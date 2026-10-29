@@ -177,6 +177,9 @@ button:focus-visible { outline: 1px dashed var(--ink); outline-offset: 2px; }
 .tags > span, .tags .live { white-space: nowrap; font-size: 9px; letter-spacing: 0; }
 .vers { gap: 3px; }
 .vb { min-width: 30px; padding: 1px 5px; }
+.pin .lbl { cursor: grab; }
+.pin.dragging { z-index: 4; }
+.pin.dragging .lbl { cursor: grabbing; box-shadow: 3px 3px 0 rgba(240,120,58,0.45); }
 @media (prefers-reduced-motion: reduce) { .cursor, .grow, .win.pop, .pg.in-r, .pg.in-l { animation: none; } }
 </style>
 
@@ -768,17 +771,47 @@ button:focus-visible { outline: 1px dashed var(--ink); outline-offset: 2px; }
   function slug(n) { return lang === "en" && n.en_id ? n.en_id : n.id; }
   function el(tag, cls, txt) { var e = document.createElement(tag); if (cls) e.className = cls; if (txt != null) e.textContent = txt; return e; }
 
+  // ---------- links can be dragged around the body ----------
+  var pinPos = {};
+  try { pinPos = JSON.parse(localStorage.getItem("tos-pins") || "{}") || {}; } catch (e) { pinPos = {}; }
+  function pinDrag(btn, pin, n) {
+    var sx = 0, sy = 0, ox = 0, oy = 0, on = false, moved = false;
+    btn.style.touchAction = "none";
+    btn.addEventListener("pointerdown", function (e) {
+      on = true; moved = false; sx = e.clientX; sy = e.clientY;
+      ox = parseFloat(pin.style.left); oy = parseFloat(pin.style.top);
+      try { btn.setPointerCapture(e.pointerId); } catch (er) {}
+    });
+    btn.addEventListener("pointermove", function (e) {
+      if (!on) return;
+      var dx = e.clientX - sx, dy = e.clientY - sy;
+      if (!moved && Math.hypot(dx, dy) < 6) return;
+      moved = true; pin.classList.add("dragging");
+      var sw = stage.clientWidth, sh = stage.clientHeight;
+      var x = Math.max(0, Math.min(100, ox + dx / sw * 100)), y = Math.max(0, Math.min(97, oy + dy / sh * 100));
+      pin.style.left = x + "%"; pin.style.top = y + "%";
+      pinPos[n.id] = { x: x, y: y };
+    });
+    function end() {
+      if (!on) return; on = false; pin.classList.remove("dragging");
+      if (moved) { btn._dragged = true; try { localStorage.setItem("tos-pins", JSON.stringify(pinPos)); } catch (e) {} }
+    }
+    btn.addEventListener("pointerup", end); btn.addEventListener("pointercancel", end);
+  }
+
   function renderPins() {
     var olds = stage.querySelectorAll(".pin"); for (var i = 0; i < olds.length; i++) olds[i].remove();
     TREE.forEach(function (n) {
       var pin = el("div", "pin" + (n.pin.right ? " right" : ""));
-      pin.style.left = (n.pin.c / COLS * 100) + "%";
-      pin.style.top = (n.pin.r / ROWS * 100) + "%";
+      var pp = pinPos[n.id] || { x: n.pin.c / COLS * 100, y: n.pin.r / ROWS * 100 };
+      pin.style.left = pp.x + "%";
+      pin.style.top = pp.y + "%";
       var b = el("button", "lbl" + (fresh[n.id] ? " grow" : ""));
       b.type = "button";
       b.appendChild(el("span", "t", n[lang]));
       b.setAttribute("aria-expanded", open[n.id] || (winNode === n) ? "true" : "false");
-      b.addEventListener("click", function () { hit(n, [n], 0); });
+      b.addEventListener("click", function (e) { if (b._dragged) { b._dragged = false; e.preventDefault(); return; } hit(n, [n], 0); });
+      pinDrag(b, pin, n);
       pin.appendChild(b);
       if (open[n.id] && n.kids) {
         var box = el("div", "kids");
